@@ -1,0 +1,218 @@
+---
+title: "Proyecto de Evaluacion R-R Studio"
+author: "Sergio A. Torres Varela"
+output: html_document
+date: "2024-04-06"
+---
+
+## Introducción
+En el presente documento haremos uso de un conjunto de datos obtenidos por el *United States Geological Service* (USGS) desde su página web, la descarga de estos datos es abierta y se puede realizar desde aqui: [USGS](https://earthquake.usgs.gov/fdsnws/event/1/query.csv?starttime=1900-01-01%2000:00:00&maxlatitude=72.299&minlatitude=18.01&maxlongitude=-66.973&minlongitude=-195.645&minmagnitude=7&orderby=time) 
+
+Estos datos representan los eventos sísmicos que tuvieron lugar entre el 01 de abril de 2024 y el 08 de abril de 2024 (de hecho, estos datos se actualizan diariamente), todos ellos con una intensidad mayor o igual a 2.5 a nivel mundial, los datos se recopilan a través de servicios sismológicos que comparten sus datos obtenidos.
+
+Nuestro primer paso será visualizar este mapa a través del uso de la librería *mapview*, para ellos deberemos limpiar nuestros datos para así no tener problemas con las celdas que no tienen datos (más adelante aprendimos que existe una forma de manejar ese tipo de datos ausentes), para visualizar correctamente el mapa, los datos de latitud y longitud necesitan invertirse en nuestro código, de otra forma no veremos correctamente su ubicación, un detalle más, una de las opciones es **crs** (Coordinate Reference System), existen dos tipos de crs, geográficos y proyectados, un crs geográfico utiliza un sistema de coordenadas de latitud y longitud para la ubicación espacial de los datos, mientras un crs proyectado utiliza un sistema bidimensional cartesiano con base en una superficie plana, como lo son los mapas que usualmente conocemos, en nuestro caso usaremos el `crs = 4326`, que es el [EPSG](https://en.wikipedia.org/wiki/Geodetic_datum) asignado a un sistema de coordenadas *latitud/longitud* basado en el centro de masa de la tierra.
+
+Primero, demos un vistazo a nuestros datos:
+
+```{r echo=FALSE}
+library(tidyverse)
+library(sf)
+library(mapview)
+library(extrafont)
+extrafont::loadfonts(device="win")
+
+
+sismos <- read_csv("C:/Users/SERGIOANTONIOTORRESV/Documents/R_RStudio/Proyecto/datos/2.5_week_Cleant.csv", show_col_types = FALSE)
+
+sismosWRLD <- sismos  %>% 
+  filter(Type == "earthquake")
+
+sismosWRLD %>% 
+  glimpse()
+```
+
+Como pudimos ver, nuestros datos en el *summary*, nuestros datos constan de 325 registros, mismos que se trazarán en le mapa, en él, podemos hacer click en cada uno de los localizadores para ver sun infromación, si hacemos clic en el botón capa, podremos cambiar el despliegue gráfico de nuestro mapa:
+
+#### Mapa de eventos sísmicos con intensidad mayor o igual a 2.5, entre el 01 y el 08 de abril de 2024.
+
+``` {r echo=FALSE}
+mapview(sismosWRLD, xcol = "longitude", ycol = "latitude", crs = 4326, grid = FALSE)
+# las coordenadas se tuvieron que invertir para obtener un mapa representativo
+```
+
+El *summary* de nuestros datos de fecha del evento y su magnitud es el siguiente:
+
+```{r echo=FALSE}
+library(ggplot2)
+library(hrbrthemes)
+
+subconjunto <- subset(sismos, select = c(mag, Date))
+names(subconjunto) <- c("Magnitud", "Fecha")
+summary(subconjunto)
+# Se debe corregir el formato de la columna Date a yyyy-mm-dd, de otra forma, se genera un error.
+```
+
+``` {r echo=FALSE}
+fit = lm(Magnitud ~ Fecha, data = subconjunto)
+b = coef(fit)
+plot(subconjunto)
+abline(fit)
+```
+
+La pendiente de correlación es `r b[2]`, es decir, la correlación de nuestros datos es casi inexistente, por lo que deberemos investigar si es debido a la orientación de los datos, invirtamos su orientación y volvamos a visualizarlos:
+
+``` {r echo=FALSE}
+library(dplyr)
+ggplot(subconjunto, aes(x=Fecha, y=Magnitud)) + 
+    geom_point(
+        color="black",
+        fill="#69b3a2",
+        shape=22,
+        alpha=0.5,
+        size=2,
+        stroke = 1
+        ) +
+    theme_ipsum()
+```
+
+``` {r echo=FALSE}
+subconjunto2 <- subset(sismos, select = c(Date, mag))
+# names(subconjunto2) <- c("Fecha", "Magnitud")
+
+fit2 = lm(mag ~ Date, data = subconjunto2)
+b2 = coef(fit2)
+# plot(subconjunto2)
+# abline(fit2)
+```
+
+La pendiente de correlación es `r b2[2]`, sin embargo la dispersión de nuestros datos es muy alta. Veamos el diagrama de caja de nuestros datos:
+
+``` {r echo=FALSE}
+
+box_plot <- ggplot(subconjunto, aes(group = 1, x = Fecha, y = Magnitud))
+
+box_plot +
+    geom_boxplot()
+```
+
+Nuestro diagrama de caja no es incorrecto, sin embargo no es muy informativo, pues nos da los datos correspondientes a todos nuestros datos como un solo ente, por lo que deberemos de cambiar de par de datos a investigar, ya que la fecha es una variable discreta y no tiene mucho sentido una recta de ajuste porque necesitaríamos un origen, y ¿cuál es el origen del tiempo?
+
+Un diagrama que es un poco más informativo es el de caja por día en nuestros mismos datos, para ello, debemos primero mutar nuestros datos porque en ellos tenemos fecha en el formato *yyyy-mm-dd*, y como sólo hacemos uso de una semana, el mes y año son el mismo para todos ellos, al extraer el día, nos queda un número entero (día), por lo que hay que agregar una etiqueta a cada uno de los días, como uno de ellos se repite, haremos uso de una etiqueta similar.
+
+
+``` {r echo=FALSE}
+sismos <- read_csv("C:/Users/SERGIOANTONIOTORRESV/Documents/R_RStudio/Proyecto/datos/2.5_week_Cleant.csv", show_col_types = FALSE)
+
+datos_limpios <- sismos %>% 
+  select(-c(time, latitude, longitude, magType, rms, net, id, updated, Date, place, Type, status, locationSource, magSource)) %>%
+  mutate(Day = factor(Day, order = TRUE, labels = c("Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo", "Lunes2")))
+```
+
+Como los hemos hecho anteriormente, primero un vistazo a nuestros nuevos datos:
+
+``` {r echo=FALSE}
+glimpse(datos_limpios)
+```
+
+Ahora, vamos a crear el diagrama de caja para nuestros datos de magnitud por día, del día 1 de abril al 8 de abril, como el día 8 es lunes de nuevo, se ha etiquetado como Lunes2.
+
+``` {r}
+box_plot <- ggplot(datos_limpios, aes(x = Day, y = mag))
+
+box_plot +
+    geom_boxplot()
+```
+
+Ahora sí, nuestro diagrama de caja resulta más informativo.
+
+
+### Profundidad vs intensidad de los eventos sísmicos
+
+Como habiamos mencionado anteriormente, vamos a investigar un poco los datos de profundidad e intensidad de los eventos de nuestro archivo de datos original, la gráfica y *summary* de nuestros datos de magnitud y profundidad a la que se producen los eventos es:
+
+```{r echo=FALSE}
+subconjunto02 <- subset(sismos, select = c(mag, depth))
+names(subconjunto02) <- c("Magnitud", "Profundidad")
+
+fit02 = lm(Magnitud ~ Profundidad, data = subconjunto02)
+c = coef(fit02)
+plot(subconjunto02)
+abline(fit02)
+
+summary(subconjunto02)
+```
+
+Como podemos ver, ahora sí hay cierta correlación entre nuestros datos, ya no están tan dispersos, normalicemos estos datos usando la técnica de *Min-Max scaling* en sus dos variables:
+
+```{r}
+#se define la función de normalización Min-Max
+min_max_norm <- function(x) {
+    (x - min(x)) / (max(x) - min(x))}
+
+#apliquemos el escalamiento en sus dos variables
+subconjunto02_norm <- as.data.frame(lapply(subconjunto02[1:2], min_max_norm))
+```
+
+Y los primeros renglones de nuestros datos normalizados son:
+
+```{r echo=FALSE}
+head(subconjunto02_norm)
+```
+*Summary* de los datos normalizados:
+
+```{r echo=FALSE}
+summary(subconjunto02_norm)
+# write.csv(subconjunto02_norm, file = "datos_normalizados.csv", row.names = FALSE, col.names = TRUE)
+write.table(subconjunto02_norm, file = "datos_normalizados.csv", row.names=F, col.names=T, sep=",")
+# print(subconjunto02_norm)
+```
+
+Ahora, visualicemos nuestros datos normalizados:
+
+```{r echo=FALSE}
+normalizados <- read_csv("C:/Users/SERGIOANTONIOTORRESV/Documents/R_RStudio/Proyecto/datos_normalizados.csv", show_col_types = FALSE)
+subconjunto03 <- subset(normalizados, select = c(Magnitud, Profundidad))
+ggplot(subconjunto03, aes(x=Magnitud, y=Profundidad)) + 
+    geom_point(
+        color="black",
+        fill="#69b3a2",
+        shape=22,
+        alpha=0.5,
+        size=2,
+        stroke = 1
+        ) +
+    theme_ipsum()
+
+# para_calcular <- subconjunto03$Magnitud 
+# sd(para_calcular)
+```
+
+Una variación de representación de nuestros datos, en la que acompañamos la gráfica anterior por el histográma de frecuencias de los valores de cada variable. 
+
+``` {r echo=FALSE}
+library(ggExtra)
+
+# create a ggplot2 scatterplot
+p <- subconjunto02 %>%
+  ggplot( aes(x=Magnitud, y=Profundidad)) +
+    geom_point(
+      color="#69b3a2", 
+      alpha=0.8) +
+    theme_ipsum() +
+    theme(
+      legend.position="none"
+    )
+
+# add marginal histograms
+ggExtra::ggMarginal(p, type = "histogram", color="grey")
+```
+
+Es justo mencionar que el documento html final, se editó para que no se mostraran los *warning* de el sistema por el uso de la librería *hrbrthemes*, haciendo una investigación, no hay un motivo claro aún para estas advertencias, ni una solución defintiva a este *issue* de la librería mencionada.
+
+***
+
+
+
+
+
+
